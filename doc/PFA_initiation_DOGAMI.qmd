@@ -1,0 +1,359 @@
+---
+title: "Steep-slopes modeling for the Private Forest Accord"
+author: "Dan Miller and Julia Lober"
+format: 
+  html:
+    toc: true
+    toc-float: true
+    toc-depth: 3
+    number-sections: true
+    code-folding: hide
+    theme: readable
+    code-fold: true
+    code-overflow: scroll
+date: May 24, 2023
+editor: visual
+number-sections: true
+bibliography: references.bib
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r load, include = FALSE}
+library(TerrainWorksUtils)
+library(terra)
+library(stringr)
+library(car)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(mlr3verse)
+library(iml)
+library(colorspace)
+library(RColorBrewer)
+```
+
+# Introduction
+
+In steep-land regions of Oregon, landsliding of shallow soils that subsequently evolve into a debris flow are a primary process by which sediment and wood is carried from hillslopes to valley floors and stream channels [@Swanson1982; @benda1997; @reeves2003a]. The deposits formed by these events profoundly influence valley floor and channel morphology [@benda1990a; @bigelow2007]. At any single failure site, the frequency of such events is rare, with recurrence intervals spanning thousands of years [@benda1987]. There are many such sites, however, so when integrated over a channel network, these landslides and debris flows are important drivers of the disturbance regime that acts, in part, to set the spatial and temporal distribution of habitat types across a basin [@bendaEtal1998; @rieman2006a]. A goal of forest management is, therefore, to avoid doing things that will change that disturbance regime [@penaluna2018a]. This is reflected in the Private Forest Accord's approach to timber harvest on steep slopes [Chapter 3 and Appendix B, @odf2022], for which harvest prescriptions apply to the source areas and traversal corridors of debris flows that might travel to fish-bearing streams. These zones are ranked by the frequency of debris-flow delivery to fish-bearing streams, so that prescriptions can target those zones where timber harvest is most likely to alter the frequency and magnitude of sediment and wood fluxes to those streams.
+
+These source areas and transport corridors are identified for the PFA using models of landslide initiation and debris-flow runout developed by Kelly Burnett and myself with the Coastal Analysis and Modeling Study ([CLAMS](https://www.fsl.orst.edu/clams/)) as described in Miller and Burnett [-@miller2007; -@miller2008], with application of the models described in Burnett and Miller [-@burnett2007]. The original models were calibrated using landslide-initiation locations, debris tracks, and "debris-torrent"-impacted channels that were field surveyed for the 1996 Storm Study by the Oregon Department of Forestry (ODF) [@robison1999] and digitized to 10-meter line-trace DEM base maps. Several factors motivate a re-calibration and re-examination of these models.
+
+-   Recent work by the Oregon Department of Geology and Mineral Resources [Special Paper 53, @burns2022] now provides an inventory of landslide initiation points and debris-flow-runout tracks with a greater geographic and temporal range than available from the 1996 Storm Study,
+
+-   high-resolution DEMs derived from lidar are now available for much of Oregon (<https://www.oregongeology.org/lidar/>), and
+
+-   statistical methods and analysis tools have progressed considerably in the last 15 years.
+
+The Miller-Burnett models identify the channels susceptible to direct impacts from debris flows originating upslope and delineate the source areas for those debris flows. Although the initiation and evolution of a landslide into a debris flow is a continuous process, the models examine landslide initiation and runout separately. This is because initiation and runout involve different sets of physical processes influenced by different sets of environmental factors. An empirical approach is used for both cases, in which statistical models are calibrated using observed landslide initiation sites and debris-flow tracks, but with the choice of explanatory variables (also called the independent variables or predictors) based on current understanding of the physical processes involved. The models are linked in that the modeled potential for downslope impacts is a function of both initiation probability and runout probability. This document focuses on landslide initiation; a separate document describes the analysis done for debris-flow runout and subsequent analyses that utilize the linked models.
+
+In the realm of forest practices, determination of hazards related to landsliding and debris flows has traditionally relied on field observations and mapping done by experienced professionals. Oregon, for example, provides guidelines for identifying and rating areas susceptible to shallow, rapidly moving landslides ([Forest Practices Technical Note Number 2](https://www.oregon.gov/odf/Documents/workingforests/HighLandslideHazardLocationsTechNote2.pdf) and [Number 6](https://www.oregon.gov/odf/Documents/workingforests/LandslideImpactRatingTechNote6.pdf)). Washington state provides guidance in the Forest Practice Board Manual ([Section 16, Guidelines for Evaluating Potentially Unstable Slopes and Landforms](https://www.dnr.wa.gov/publications/bc_fpb_bmsection16_2022.pdf)). At one point, Lee Benda, I, and several others offered training for field identification and mapping of landslide hazards ([Slope Instability and Forest Land Managers](https://terrainworks.sharefile.com/d-s02d3fbb2b87b4ae687e8d71d0d4ca729)).
+
+So why use a computer model now? Timber-land management seeks to promote both ecologic and economic integrity. Decisions about how to do that in the context of landslides and debris flows invariably involves trade offs between the extent of area where harvest restrictions apply and the area available for timber production. A method or model to quantify those trade offs can provide cost-benefit comparisons to inform decision makers. Once those decisions are made, a consistent method for mapping those areas across landslide-prone regions of Oregon is needed so that timber-land managers can incorporate that information into harvest and road-construction planning and anticipate the consequences for field operations. A computer model can provide a quantitative and consistent method for that mapping. The resulting maps are not necessarily better than those provided through manual mapping; indeed, ground-based observations will still be essential for the final determination of landslide-prone zones because many factors that influence landslide potential cannot be resolved from the remotely sensed data used by computer models. Several factors, however, render a computer model well suited for this task:
+
+-   Manual mapping is subject to the experience and biases of the mapper, so different mappers produce slightly different maps. A computer model can provide a consistent result.
+
+-   Manual mapping requires experienced professionals and takes considerable time and effort. A computer model can provide results for the entire state in a matter of hours. However, development of the model takes considerable time, effort, and expertise.
+
+-   A computer model can incorporate information that is unavailable or difficult to measure through field observations alone. This includes such things as the upslope area contributing shallow subsurface flow for storms of variable duration or the cumulative length of scour zones along all potential upslope debris-flow corridors.
+
+-   A computer model can be designed to make quantitative predictions of probability. Traditional field mapping may offer estimates of high, medium, and low potential, but cannot provide measures of probability. Comparisons of the costs and benefits of different options requires quantitative estimates of the consequences associated with those options, which requires quantitative estimates of the probability of the different potential consequences.
+
+These models are empirical, in that they seek statistical relationships between observed landslide initiation locations and debris-flow corridors with topographic, geologic, and land-cover attributes. Given the large area over which the models must be applied, we use attributes that can be mapped remotely. Modeling strategies span a range from purely physically based (or process-based) models; those based solely on physical explanations of the phenomena modeled (landslide initiation and debris-flow runout), to purely empirical models, based solely on observed associations (locations of landslide initiation sites and channels traversed by debris flows with topographic, geologic, and land-cover attributes). In practice, physical models tend to include empirical components, and likewise empirical models may include and be guided by the underlying physical theory. That is true here; we use the conceptual physics of soil failure to guide our choice of topographic, geologic, and land-cover attributes to compare with landslide and debris-flow locations.
+
+There are physically based models that could be applied here. SHALSTAB [@montgomery1994a; @dietrich2001a], for example, could be used for landslide initiation and a model like [D-Claw](https://dlgeorge.github.io/project/dclaw-project) could be used for runout [see also @iverson2014a]. There are several reasons we chose an empirical approach.
+
+-   With a physically based model, we need to know the physics of what is occurring. There may be things occurring that we do not know about and would not, therefore, be included in a physically based model.
+
+-   Physically based models incorporate simplifications and abstractions of the actual phenomena. This is intrinsic in development of mathematical descriptions of physical phenomena. SHALSTAB, for example, assumes steady-state rainfall onto a planar slope with uniform soil depth; simplifications of actual time-varying rainfall onto slopes with a great deal of topographic convergence and divergence and variable soil depths. This simplification allows for a concise mathematical description of soil failure with which predictions of where landslides are likely to occur can be made, but it will also result in inaccuracies in those predictions.
+
+-   Physically based models require quantitative details about environmental attributes for which we have no information, such as spatial variations in soil depth and texture and the time series of rainfall. Application of these models then requires assumptions about these attributes, which will again result in inaccuracies in model predictions.
+
+For these reasons, physically based models are often used to test and improve our understanding of the physics involved. Errors in predictions point to missing components in the model, or over simplification, or incorrect assumptions. Physically based models are also useful for anticipating the influence of different components in the model. For example, SHALSTAB has been used to show how loss of root strength associated with timber harvest might affect the area subject to landslide initiation [@montgomery1998]. To evaluate effects of root strength with an empirical model requires extensive observations of landslide locations under different forest stand conditions and, even if a correlation is found, we would still be uncertain about the actual cause. But to know if predictions of a physical model are correct or not requires the same data. We need some measure of reality to compare to model predictions, without which we have no idea how much confidence to place in those predictions.
+
+Empirical models come with their own sets of strengths and weaknesses:
+
+-   Empirical models can provide useful prediction even if our understanding is incomplete or the information available is insufficient to fully characterize the processes occurring. For example, to calculate the forces acting on a column of soil on a hillslope to calculate the potential for it to fail we need to know the soil depth, but we have no way to actually measure soil depths over regional extents. However, field studies find that soil depths vary systematically with topographic attributes of slope and curvature. These are quantities that we can measure over regional extents using digital elevation models (DEMs) and correlations are found between these topographic attributes and landslide locations. Even though we have not actually measured soil depth, these correlations provide a way to predict where landslides can occur.
+
+-   An empirical model sees only what the data provided it offers. We seek correlations between inventories of mapped landslide locations with environmental attributes. If those inventories provide an incomplete or biased sample of where landslides can occur, then the resulting model will be incomplete or biased.
+
+-   To estimate the effect of incomplete or biased data on predictions of an empirical model, a model can be trained (calibrated) with a portion of the available data and the predictions of that model then tested (compared) against the remaining data. The size of the prediction error on that test portion of the data provides an estimate of model sensitivity to the sample of landslide sites used to build the model. Current analysis protocols repeat that procedure many times using different subsamples for training and testing the model in each iteration. The range of prediction errors provides a measure of model sensitivity with which to gauge the confidence to place in predictions made for locations where landslide inventories for testing the model are not available.
+
+-   The statistical methods used for empirical models use mathematical representations of the relationships between variables. The coefficients for those mathematical equations are adjusted so that the predicted relationship matches the observed relationship as closely possible. For example, we may use a linear equation to relate slope gradient to landslide density. We then adjust the coefficients for that equation to minimize the difference between the predicted and measured densities. The ability of that model to then predict actual landslide densities depends on how well a linear equation represents the actual relationship.
+
+-   We must chose what variables to include in an empirical model. If the variables we chose have strong correlations with landslide location, then an empirical model can work well for predicting where landslides will occur. We therefore strive to include all variables that might correlate with landslide locations. There is also the potential for spurious correlations. A model trained to match random errors or noise in our data might appear to perform well on the training data but will do poorly at predicting landslide locations elsewhere. Separating the signal from the noise inherent in all data sources can be difficult; understanding of the physical basis of the phenomena can guide the choice of variables and mathematical equations used to characterize relationships between variables.
+
+-   The statistical methods used for empirical models can provide a measure of probability. This is the primary reason that we use empirical methods for the steep-slopes analyses performed for the PFA.
+
+Physically based and empirical models are not mutually exclusive. We incorporate elements of both in this analysis. We use the conceptual models on which physical models are built to guide our choice of explanatory variables and we incorporate predictions of a simple physically based model for water flux through hillslope soils as an explanatory variable.
+
+# Landslide initiation.
+
+## Quantitative measures of susceptibility.
+
+For the PFA, we seek to identify source areas and traversal corridors for debris flows that carry sediment and wood to fish-bearing streams and to rank these by the relative frequency of debris-flow occurrence. To do that, for each point on a hillslope, we need to determine the probability for initiation of a debris-flow-triggering landslide and the probability that the subsequent debris flow will travel to a fish-bearing stream. In this document we focus on the probability of initiation; analysis of runout is addressed in a separate document. For this task, we do not need to know anything about when landslides will occur, only where they originate and the relative frequency with which they occur. We use an inventory of mapped landslide locations to do this. Landslide density, the number of landslides per unit area, provides an indicator of where landslides are more or less likely to occur. Higher density indicates higher probability of occurrence. If we observe that landslide density varies with topographic, geologic, and land-cover attributes; statistical methods can be used to build empirical models that specify landslide density as a function of those attributes. Multiplying density by area gives number of landslides; for a DEM cell, multiplying density by cell area gives the probability that a DEM cell contains a landslide initiation point from the landslide inventory. Empirical models that show how attributes of topography, geology, and land cover relate to landslide density thus translate directly to the probability that a DEM cell contains a landslide initiation point. Summing that probability for all DEM cells spanning the study area will return the number of observed landslides. Our goal then is to find models that resolve correlations between landslide density and mapped landscape and environmental attributes.
+
+Landslide inventories show us where landslides occur and we use landslide density determined from these inventories as a measure of the likelihood of finding a landslide. To determine how frequently landslides occur requires measures of landslide rate: number per unit area per unit time. Direct measures of rate requires landslide inventories that span not only large areas but also long time periods. Available inventories do not span sufficient time to make reliable measures of rate. Instead, we use landslide density as an indirect measure of rate. An inventory shows how many landslides occurred over some finite period of time. If the spatial variation in landslide density is constant over time, then a one-time measure of that spatial variation is proportional to the spatial variation in landslide rate. We can infer spatial variations in landslide frequency directly from spatial variations in landslide density. If, however, relative differences in density change over time - if, for example, different storms tend to trigger landslides in different types of locations - then we need an inventory that spans sufficient time for a representative sample of storms to occur. The inventories collected by ODF for the 1996 storm study indicated how many landslides occurred during the February and November storms in 1996. The models built using that inventory [@miller2007; @miller2008] reflect the landslide locations associated with those storms. We do not know if different storm events would produce different patterns in the spatial distribution of landslides. The DOGAMI inventory in Special Paper 53 includes landslide events over a longer time span, from 1996 to 2011. This samples a larger range of storm events over a larger geographic area, so it should provide a more representative sample of where landslides occur in Oregon than the 1996 Storm-Study inventory.
+
+A variety of statistical methods can be used to find associations between landslide density and landscape attributes. In our 2007 study [@miller2007], Kelly and I used the "frequency ratio" method, which estimates the change in area and the change in the number of landslides associated with some small change in the attribute of interest. This gives landslide density directly. Classification methods can also be used. These methods seek to classify any location as to whether it is or is not a landslide initiation point. This classification is based on the modeled probability: a probability greater than some specified threshold (e.g., 0.5) is classified as an initiation point. We are interested in the modeled probability, not the classification. Commonly used classification models include logistic regression, random forest, and support vector machines. For any set of attribute values, these models estimate probability as the proportion of sampled sites that contain initiation points included within the data space local to those attribute values.
+
+Within any study area, landslide initiation points occupy a very small proportion of the total area. Consider a 10 km^2^ study area with an average landslide density of 1 landslide/km^2^ (10 landslides total). Using a 1-m lidar-derived DEM, there would be 10 DEM cells with landslide initiation points out of 10 million total cells. Calculations using such an unbalanced sample may reach the limits of computer precision; hence subsamples of the non-initiation DEM cells are typically used for analysis of landslide susceptibility. Because probability is based on the proportion of the total sample composed of initiation points and the number of initiation points is set by the landslide inventory, the modeled probability is proportional to the number of nonlandslide points included in the sample. This is not a problem if the sampled points are representative of the range of conditions over the study area: we are interested in the *spatial variation* of probability, not the magnitude. If we had a larger landslide inventory, for example, with twice as many landslide points over the same study area, landslide densities and modeled probabilities would be twice as large. Likewise, changing the balance of the sample between landslide and nonlandslide points will change the magnitude of the modeled probability, but as long as the samples are representative of conditions over the study area, that will not change the spatial pattern of relative changes. For the PFA analyses, we ultimately translate modeled probabilities to proportions of landslide and debris-flow events, and these proportions are not affected by uniform changes in probability.
+
+We use logistic regression to model initiation probability. The frequency ratio used in the original model works well for one variable, but classification methods are better suited for multiple variables. Logistic regression is more easily interpreted and understood than the other classification methods.
+
+## Predictors
+
+There are several things to consider when choosing predictors to include in an empirical model:
+
+-   [Which landscape attributes are related to landslide density?]{.underline} The ability of a model to resolve variability in landslide potential depends on the degree to which the predictors used in the model are systematically associated with spatial changes in landslide density. We do not want to exclude any potentially informative predictors, but inclusion of uninformative or biased predictors will negatively impact model performance. In a review of the literature, Lima et al. [-@lima2022] counted 116 different predictors that have been applied in empirical models for landslide susceptibility. Such latitude offers plenty of opportunity for wasting time. Our choice of predictors is guided by physically based models of soil failure.
+
+-   [Which attributes can be measured over the area of western Oregon where the model must be applied?]{.underline} Any predictors used must be obtainable from data sets with consistent state-wide coverage. Topographic attributes are calculated from lidar DEMs, which are available for almost the entire area. Datasets for substrate (geology) and land cover are available, but at lower spatial resolution than the DEMs.
+
+-   [At what spatial scale should the attributes be measured?]{.underline} The length over which measurements of landscape attributes can be made is constrained by the spatial grain of available data. Within those constraints, measurements should be made at length scales appropriate for the physical processes driving soil failure. Lidar DEMs provide point measures of elevation over approximately a one-meter grid spacing. Measures of topographic attributes can therefore be made from a length of several meters, spanning two to three DEM points, to any longer length desired. The value measured will vary with the length over which it is measured. Consider gradient: measurements over several meters will resolve the effect of tree-fall pits. Measurements over tens of meters will miss the pits, but will resolve changes in gradient associated with bedrock hollows. Measurements over hundreds of meters will resolve influence of large headwalls. A length scale that is too small will resolve changes in gradient not associated with landslide locations, thus adding noise to the data; a length scale too large will miss the topographic features associated with individual landslides.
+
+### Which Attributes?
+
+Conceptually, soil on a hillslope will slide downslope when the gravitational force acting to move it downslope exceeds the forces acting to hold it in place. The physical details are quite complex, but geotechnical engineers have abstracted these details into relatively simple models that are remarkably successful at describing observed soil failures. These simple models guide our choice of predictors. The "infinite slope" model [@Skempton1957] is the starting point for physically based models of soil failure [such as STALSTAB; @montgomery1994a]. Forces are calculated for a column of soil overlying a competent substrate. The weight per unit area of the column (weight equals column depth times soil bulk density) times the sine of the slope angle gives the force acting to move the column downslope. Frictional resistance, intrinsic soil cohesion, and the network of plant roots connecting the column to the substrate act to hold the column in place. Water filling the void spaces between soil particles reduces frictional resistance to an amount proportional to the depth of saturation.
+
+Even for this simple model, we cannot measure all the variables required to calculate these forces (soil depth, friction angle, cohesion, saturation depth), but we can measure the topographic and land cover attributes that influence these variable values. Slope gradient can be obtained directly from a DEM. Field surveys find that soil depth correlates with slope and topographic curvature [@patton2018a]. During a rainstorm, infiltrating water flows downslope through the soil layer. The volume of water flowing through a column of soil increases during the storm as infiltrating water from further and further upslope reaches the column. That volume is determined by the area from which infiltrating water reaches the soil column (the contributing area) and the rainfall intensity (depth per unit time). The contributing area, and the corresponding depth of saturation, increases during the storm at a rate dependent on rainfall intensity and upslope topography. The velocity with which water flows through the soil increases as slope gradient increases. We can use the spatial variation in upslope gradient and aspect to calculate the size of the contributing area to a column of soil over time. Spatial variation in contributing area translates to spatial variation in saturation depth [e.g., @iida1999]. Thus, based on this simple model, the spatial distribution of three topographic attributes is related to the potential for landslide initiation: slope gradient, curvature, and aspect. These can all be calculated using a DEM.
+
+What is mappable?
+
+-   Gradient.
+
+-   Contributing area: for a storm of specified duration.
+
+-   Soil depth - curvature + slope.
+
+-   Stand age
+
+-   Distance to road
+
+-   Substrate - rock type.
+
+# Data
+
+## DOGAMI inventory.
+
+### Sources.
+
+### Mapping protocol.
+
+Serendipitous sample - not a census. Use local sampling strategy: [@zhu2017][@nowickijessee2018a]
+
+Balanced or unbalanced sample.
+
+Plots of landslide density and log(odds) versus predictors.
+
+```{r}
+grad <- read.csv("c:/work/data/pfa/den_gradient.csv")
+n <- nrow(grad)
+grad$propArea <- grad$sumArea / grad$sumArea[[n]]
+grad$propLS <- grad$sumLS / grad$sumLS[[n]]
+
+coef <- grad$sumLS[[n]] / grad$sumArea[[n]]
+ggplot(data = grad, aes(x = val, y = sumLS)) +
+       theme_bw() +
+       geom_line(color = "black", linewidth = 0.5) +
+       geom_point(aes(color = val), shape = 16, size = 4) +
+       geom_line(aes(x = val, y = sumArea*coef), color = "black", linewidth = 0.5) +
+       geom_point(aes(x = val, y = sumArea*coef, color = val), shape = 17, size = 3) +
+       scale_y_continuous(name = "Landslides", sec.axis = sec_axis(~./coef, name = "Area (sq km)")) +
+       scale_color_continuous_sequential(palette = "Viridis") +
+       labs(title = "Cumulative distributions",
+            subtitle = "Basin area and number of landslides vs gradient",  
+            x = "Gradient",
+            y = "Proportion",
+            color = "Gradient") +
+       annotate("text", x = .3, y = 450, label = "Area") +
+       annotate("point", shape = 2, size = 3, x = .45, y = 450) +
+       annotate("text", x = .3, y = 430, label = "Landslides") +
+       annotate("point", shape = 1, size = 4, x = .45, y = 430)
+```
+
+```{r}
+ggplot(data = grad, aes(x = sumArea, y = sumLS, color = val)) +
+        theme_bw() +
+        geom_line(color = "black", linewidth = 0.5) +
+        geom_point(shape = 16, size = 3) +
+        scale_color_continuous_sequential(palette = "Viridis") +
+        labs(title = "Cumulative Number of Landslides vs Cumulative Area",
+             subtitle = "Ordered by Increasing Gradient",
+             x = "Area (sq km)", 
+             y = "Number of Landslides",
+             color = "Gradient")
+```
+
+```{r}
+ggplot(data = grad, aes(x = val, y = density)) +
+  geom_point(fill = "gray", color = "black", shape = 21, size = 3, alpha = 0.5) +
+  labs(title = "Landslide Density vs Gradient", 
+       x = "Gradient",
+       y = "Landslide Density (#/cell)",
+       fill = "Gradient")
+```
+
+```{r}
+ggplot(data=grad, aes(x=val, y=log_odds)) + 
+  geom_point(shape = 21, size=2.5, color="black", fill="gray", alpha=0.5) + 
+  stat_smooth(color="black", method = "lm", formula = y~ x + I(x^2)) + 
+  stat_smooth(color="red", method = "lm", formula = y ~ x) +
+  labs(title = "Log(odds) vs Gradient",
+       subtitle = "Exhibits a nonlinear relationship",
+       x = "Gradient", 
+       y = "Log(odds) of an initiation point within a DEM cell") +
+  annotate("segment", x=0.34, xend=0.5, y=-8, yend = -8, color = "red", linewidth=1.3) +
+  annotate("text", x=0.6, y=-8, label="Linear") +
+  annotate("segment", x = 0.34, xend = 0.5, y = -8.25, yend = -8.25, color = "black", linewidth = 1.3) +
+  annotate("text", x = 0.62, y = -8.25, label = "Quadratic" )
+```
+
+```{r}
+pca48 <- read.csv("c:/work/data/pfa/den_pca48.csv")
+
+ggplot(data=pca48, aes(x=val, y=log_odds)) + 
+  geom_point(shape = 21, size=2.5, color="black", fill="gray", alpha=0.5) + 
+  ylim(-13.5,-5.5) +
+  stat_smooth(color="black", method = "lm", formula = y~ x + I(x^2)) + 
+  stat_smooth(color="red", method = "lm", formula = y ~ x) +
+  labs(title = "Log(odds) vs Contributing Area",
+       subtitle = "Also nonlinear",
+       x = "Contributing Area (DEM cells) 48 hr duration", 
+       y = "Log(odds) of an initiation point within a DEM cell") +
+  annotate("segment", x=5, xend=10, y=-6.5, yend = -6.5, color = "red", linewidth=1.3) +
+  annotate("text", x=13, y=-6.5, label="Linear") +
+  annotate("segment", x = 5, xend = 10, y = -6.8, yend = -6.8, color = "black", linewidth = 1.3) +
+  annotate("text", x = 13, y = -6.8, label = "Quadratic" )
+```
+
+```{r}
+tancurv <- read.csv("c:/work/data/pfa/den_tancurv.csv")
+
+ggplot(data=tancurv, aes(x=val, y=log_odds)) + 
+  geom_point(shape = 21, size=2.5, color="black", fill="gray", alpha=0.5) + 
+  ylim(-13, -5) +
+  stat_smooth(color="black", method = "lm", formula = y~ x + I(x^2)) + 
+  stat_smooth(color="red", method = "lm", formula = y ~ x) +
+  labs(title = "Log(odds) vs Tangential curvature",
+       subtitle = "Also nonlinear",
+       x = "Tangential Curvature", 
+       y = "Log(odds) of an initiation point within a DEM cell") +
+  annotate("segment", x=-0.07, xend=-0.03, y=-6.5, yend = -6.5, color = "red", linewidth=1.3) +
+  annotate("text", x=-0.01, y=-6.5, label="Linear") +
+  annotate("segment", x = -0.07, xend = -0.03, y = -6.8, yend = -6.8, color = "black", linewidth = 1.3) +
+  annotate("text", x = -0.01, y = -6.8, label = "Quadratic" )
+```
+
+```{r}
+n <- nrow(pca48)
+pca48$propArea <- pca48$sumArea / pca48$sumArea[[n]]
+pca48$propLS <- pca48$sumLS / pca48$sumLS[[n]]
+
+coef <- pca48$sumLS[[n]] / pca48$sumArea[[n]]
+ggplot(data = pca48, aes(x = val, y = sumLS)) +
+       theme_bw() +
+       geom_line(color = "black", linewidth = 0.5) +
+       geom_point(aes(color = val), shape = 16, size = 4) +
+       geom_line(aes(x = val, y = sumArea*coef), color = "black", linewidth = 0.5) +
+       geom_point(aes(x = val, y = sumArea*coef, color = val), shape = 17, size = 3) +
+       scale_y_continuous(name = "Landslides", sec.axis = sec_axis(~./coef, name = "Area (sq km)")) +
+       scale_color_continuous_sequential(palette = "Viridis") +
+       labs(title = "Cumulative distributions:\nproportion of area and landslides vs contributing area",  
+            x = "Contributing Area (DEM cells, 48-hour duration)",
+            y = "Proportion",
+            color = "Contributing\nArea") +
+       annotate("text", x = 5, y = 450, label = "Area") +
+       annotate("point", shape = 2, size = 3, x = 10, y = 450) +
+       annotate("text", x = 5, y = 430, label = "Landslides") +
+       annotate("point", x = 10, y = 430, shape = 1, size = 4)
+```
+
+```{r}
+ggplot(data = pca48, aes(x = sumArea, y = sumLS, color = val)) +
+        theme_bw() +
+        geom_line(color = "black", size = 0.5) +
+        geom_point(shape = 16, size = 3) +
+        scale_color_continuous_sequential(palette = "Viridis") +
+        labs(title = "Cumulative Number of Landslides vs Cumulative Area",
+             subtitle = "Ordered by Contributing Area",
+             x = "Area (sq km)", 
+             y = "Number of Landslides",
+             color = "Contributing\nArea")
+```
+
+```{r}
+ggplot(data = pca48, aes(x = val, y = )) +
+  geom_point(aes(x = val, y = density), fill = "gray", color = "black", shape = 21, size = 3, alpha = 0.5) +
+  labs(title = "Landslide Density vs Contributing Area", 
+       x = "Contributing Area in cells, 48-hour duration",
+       y = "Landslide Density (#/cell)",
+       fill = "Contributing\nArea")
+```
+
+```{r}
+ggplot(data=pca48, aes(x=val, y=log_odds)) + 
+  geom_point(shape = 21, size=2.5, color="black", fill="gray", alpha=0.5) + 
+  ylim(-13.5,-5.5) +
+  stat_smooth(color="black", method = "lm", formula = y~ x + I(x^2)) + 
+  stat_smooth(color="red", method = "lm", formula = y ~ x) +
+  labs(title = "Log(odds) vs Contributing Area",
+       subtitle = "Exhibits a nonlinear relationship",
+       x = "Contributing Area (DEM cells) 48 hr duration", 
+       y = "Log(odds) of an initiation point within a DEM cell")
+```
+
+```{r}
+# 2d plots
+areaxy <- read.csv("c:/work/data/pfa/denGradPCA10_area0.csv")
+lsxy <- read.csv("c:/work/data/pfa/denGradPCA10_ls0.csv")
+denxyz <- read.csv("c:/work/data/pfa/denGradPCA10_den.csv")
+areaplot <- ggplot(areaxy, aes(x,y)) +
+  geom_bin2d(bins=500) + 
+  xlim(0,1.3) + 
+  ylim(0,60)
+```
+
+```{r}
+areaplot + scale_fill_distiller(palette="Spectral") + 
+  geom_point(data=lsxy, aes(x,y,color="black"), size=1) + 
+  geom_density2d(data=lsxy, aes(x,y), color="black") + 
+  theme_bw() + 
+  labs(x = "Gradient (rise/run)", y = "48-hr Contributing Area (DEM cells)", fill = "DEM-cell\ncount") +
+  scale_color_identity(name="",guide="legend",labels="DOGAMI\nInitiation\nPoint")
+```
+
+```{r}
+# 2d plots
+areaxy <- read.csv("c:/work/data/pfa/denGradtan10a_area0.csv")
+lsxy <- read.csv("c:/work/data/pfa/denGradtan10a_ls0.csv")
+denxyz <- read.csv("c:/work/data/pfa/denGradtan10a_den.csv")
+areaplot <- ggplot(areaxy, aes(x,y)) +
+  geom_bin2d(bins=500) +
+  xlim(0.2, 1.3) +
+  ylim(-0.2, 0.2)
+```
+
+```{r}
+areaplot + scale_fill_distiller(palette="Spectral") + 
+  geom_point(data=lsxy, aes(x,y,color="black"), size=1) + 
+  geom_density2d(data=lsxy, aes(x,y), color="black") + 
+  theme_bw() + 
+  labs(x = "Gradient (rise/run)", y = "Tangential Curvature", fill = "DEM-cell\ncount") +
+  scale_color_identity(name="",guide="legend",labels="DOGAMI\nInitiation\nPoint")
+```
+
+```{r}
+denxyz <- read.csv("c:/work/data/pfa/denGradtan10a_den.csv")
+ggplot(denxyz, aes(x,y)) + 
+  geom_tile(aes(x,y,z=z,fill=z)) +
+  geom_point(data=lsxy, aes(x,y)) +
+  xlim(0.2, 1.3) +
+  ylim(-0.2,0.2) +
+  scale_fill_distiller(palette="Spectral") +
+  labs(x="Gradient (rise/run)", y="Tangential Curvature")
+  
+```
+
+```{r}
+areaden <- ggplot(areaxy, aes(x,y)) + stat_density_2d(aes(fill = after_stat(density)), geom = "raster", contour = FALSE)
+```
